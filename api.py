@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 from SubsidyScoringSystem import SubsidyScoringSystem
 from fastapi import FastAPI, HTTPException
@@ -18,6 +19,13 @@ warnings.filterwarnings("ignore")
 
 
 app = FastAPI(title="Subsidy Scoring API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # для демонстрации, на проде лучше указать домен
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # =========================
 # INIT SYSTEM
@@ -81,6 +89,11 @@ def get_all(limit: int = 100):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/status")
+def status():
+    if system is None:
+        return {"ready": False}
+    return {"ready": True, "total_records": len(system.df)}
 
 
 @app.get("/reload")
