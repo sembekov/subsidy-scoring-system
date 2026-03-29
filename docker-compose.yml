@@ -6,13 +6,16 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./backend/data:/app/data # Чтобы обновлять CSV без пересборки образа
+      - ./backend/data:/app/data 
     restart: always
 
   frontend:
-    build: ./frontend
-    ports:
-      - "80:80"
-    depends_on:
-      - backend
-    restart: always
+      build: ./frontend
+      container_name: project-frontend-1
+      ports:
+        - "5173:5173"
+      stdin_open: true
+      tty: true
+      environment:
+        - VITE_PORT=5173
+      command: npm start

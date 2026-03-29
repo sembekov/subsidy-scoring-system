@@ -1,14 +1,18 @@
-# Этап 1: Сборка
-FROM node:18-alpine as build-stage
-WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-RUN npm run build
+FROM node:18-alpine
 
-# # Этап 2: Раздача статики через Nginx
-# FROM nginx:stable-alpha
-# COPY --from=build-stage /app/dist /usr/share/nginx/html
-# # Если используете React Router, добавьте свой конфиг nginx
-# EXPOSE 80
-# CMD ["nginx", "-g", "daemon off;"]
+WORKDIR /app
+
+# Сначала копируем только конфиги, чтобы Docker закешировал установку библиотек
+COPY package*.json ./
+
+# Устанавливаем зависимости
+RUN npm install
+
+# Копируем всё остальное
+COPY . .
+
+# Пробрасываем порт
+EXPOSE 5173
+
+# Команда запуска (она перекроет ту, что в docker-compose, или дополнит её)
+CMD ["npm", "start"]
