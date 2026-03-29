@@ -258,6 +258,7 @@ class SubsidyScoringSystem:
                                     'recommended_percent', 'efficiency']].copy()
 
         return self
+
     def explain(self, n_candidates=5):
         df = self.shortlist_df.copy()
 
@@ -365,6 +366,41 @@ class SubsidyScoringSystem:
 
         print("\n✅ Visualizations saved to 'subsidy_scoring_analysis.png'")
         return self
+
+    def predict_with_explanation(self, input_data):
+        """
+        Метод для API - предсказание с объяснением
+        """
+        if self.model is None:
+            return self._rule_based_prediction(input_data)
+        
+        # Подготовка фич
+        X = self._prepare_features(input_data)
+        X_scaled = self.scaler.transform(X)
+        
+        # Предсказание
+        score = self.model.predict(X_scaled)[0]
+        
+        # SHAP объяснение (упрощенное)
+        importance = self._get_feature_importance_local(X_scaled[0])
+        
+        return {
+            "score": float(score),
+            "importance": importance,
+            "model_version": "random_forest_v1"
+        }
+    
+    def _prepare_features(self, input_data):
+        """Подготовка фич из входных данных"""
+        # Здесь маппинг из входных полей в фичи
+        features = {}
+        for col in self.feature_cols:
+            if col in input_data:
+                features[col] = input_data[col]
+            else:
+                features[col] = 0
+        return pd.DataFrame([features])
+
     def export_results(self):
         results = self.df[['akimat', 'region', 'district', 'final_score', 
                            'efficiency', 'success_rate', 'application_count']].copy()
@@ -385,6 +421,7 @@ class SubsidyScoringSystem:
         print("   - regional_summary.csv (regional statistics)")
         print(self.df['final_score'])
         return self
+
     def run(self):
         print("="*70)
         print("MERIT-BASED SUBSIDY SCORING SYSTEM".center(70))
