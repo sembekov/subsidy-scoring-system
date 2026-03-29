@@ -55,7 +55,7 @@ class BatchScoreResponse(BaseModel):
 # INIT SYSTEM
 # =========================
 
-DATA_PATH = "../Выгрузка_по_выданным_субсидиям_2025_год_обезлич_xlsx_Page_1.csv"
+DATA_PATH = "Выгрузка_по_выданным_субсидиям_2025_год_обезлич_xlsx_Page_1.csv"
 system = None
 explainer = None
 CACHE = {}
