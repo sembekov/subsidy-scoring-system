@@ -12,7 +12,7 @@ RUN npm install
 COPY . .
 
 # Пробрасываем порт
-EXPOSE 5173
+EXPOSE 3030
 
 # Команда запуска (она перекроет ту, что в docker-compose, или дополнит её)
 CMD ["npm", "start"]

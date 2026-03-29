@@ -13,9 +13,7 @@ services:
       build: ./frontend
       container_name: project-frontend-1
       ports:
-        - "5173:5173"
+        - "3000:3000"
       stdin_open: true
       tty: true
-      environment:
-        - VITE_PORT=5173
       command: npm start
