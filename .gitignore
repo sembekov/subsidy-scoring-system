@@ -1,0 +1,47 @@
+# ========================
+# Python
+# ========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.log
+*.sqlite3
+
+# виртуальное окружение
+venv/
+env/
+.venv/
+
+# ========================
+# Data
+# ========================
+
+# data/
+# Выгрузка_по_выданным_субсидиям_2025_год_обезлич_xlsx_Page_1.csv
+# full_scores.csv
+# shortlist_recommendations.csv
+# regional_summary.csv
+# subsidy_scoring_analysis.png
+
+# ========================
+# IDE / Editor
+# ========================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ========================
+# Node / Frontend
+# ========================
+node_modules/
+frontend/build/
+frontend/.cache/
+frontend/dist/
+
+# ========================
+# Misc
+# ========================
+.DS_Store

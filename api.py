@@ -1,12 +1,16 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import pandas as pd
 import numpy as np
-from SubsidyScoringSystem import SubsidyScoringSystem
-from explainer import SubsidyExplainer
 import logging
+
+# Импортируем простой explainer (без SHAP)
+from explainer_simple import SubsidyExplainer
+
+# Импортируем вашу систему
+from SubsidyScoringSystem import SubsidyScoringSystem
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,30 +27,28 @@ app.add_middleware(
 )
 
 # =========================
-# SCHEMAS (с explainability)
+# SCHEMAS
 # =========================
 
 class ScoreRequest(BaseModel):
-    """Запрос на скоринг одного заявителя"""
-    applicant_data: Dict[str, any]
+    applicant_data: Dict[str, Any]
 
 class ScoreResponse(BaseModel):
-    """Ответ с объяснением"""
     applicant_id: Optional[str] = None
     final_score: float
     score_normalized: float
-    recommendation: str  # "одобрить", "отклонить", "требует проверки"
+    recommendation: str
     human_review_needed: bool
     summary: str
     positive_factors: List[Dict]
     negative_factors: List[Dict]
 
 class BatchScoreRequest(BaseModel):
-    applicants: List[Dict[str, any]]
+    applicants: List[Dict[str, Any]]
 
 class BatchScoreResponse(BaseModel):
     ranked_applicants: List[ScoreResponse]
-    shortlist: List[ScoreResponse]  # топ N
+    shortlist: List[ScoreResponse]
     total_processed: int
 
 # =========================
@@ -56,32 +58,33 @@ class BatchScoreResponse(BaseModel):
 DATA_PATH = "Выгрузка_по_выданным_субсидиям_2025_год_обезлич_xlsx_Page_1.csv"
 system = None
 explainer = None
-CACHE = {}  # простой кэш
+CACHE = {}
 
 try:
+    logger.info("Loading subsidy scoring system...")
     system = SubsidyScoringSystem(DATA_PATH)
     system.run()
     
     # Инициализируем explainer если есть модель
-    if system.model is not None:
-        # Берем background данные (первые 100 строк)
-        bg_data = system.df[system.feature_cols].fillna(0).head(100)
-        bg_scaled = system.scaler.transform(bg_data)
+    if system.model is not None and hasattr(system, 'feature_importance'):
+        logger.info("Initializing explainer...")
         explainer = SubsidyExplainer(
             model=system.model,
             scaler=system.scaler,
             feature_cols=system.feature_cols,
-            background_data=bg_scaled
+            feature_importance=system.feature_importance
         )
-        logger.info("✅ Explainer initialized")
+        logger.info("✅ Explainer initialized successfully")
     else:
         logger.warning("⚠️ Using rule-based scoring (no explainer)")
         
 except Exception as e:
     logger.error(f"❌ Initialization error: {e}")
+    import traceback
+    traceback.print_exc()
 
 # =========================
-# ENDPOINTS (улучшенные)
+# ENDPOINTS
 # =========================
 
 @app.get("/")
@@ -89,7 +92,8 @@ def root():
     return {
         "message": "Subsidy Scoring API v2.0",
         "features": ["scoring", "explainable_ai", "batch_processing"],
-        "model_type": "ML" if system and system.model else "rule-based"
+        "model_type": "ML" if (system and system.model) else "rule-based",
+        "has_explainability": explainer is not None
     }
 
 @app.post("/score", response_model=ScoreResponse)
@@ -102,23 +106,24 @@ async def score_applicant(request: ScoreRequest):
             raise HTTPException(status_code=500, detail="System not ready")
         
         # Кэш по hash входных данных
-        cache_key = str(hash(str(request.applicant_data)))
+        cache_key = str(hash(str(sorted(request.applicant_data.items()))))
         if cache_key in CACHE:
             return CACHE[cache_key]
-        
-        # Преобразуем входные данные в DataFrame
-        input_df = pd.DataFrame([request.applicant_data])
-        
-        # TODO: Добавить валидацию и фичи
         
         # Если есть модель и explainer
         if system.model is not None and explainer:
             explanation = explainer.explain_prediction(request.applicant_data)
+            
+            # Добавляем ID если есть
+            if 'id' in request.applicant_data:
+                explanation['applicant_id'] = str(request.applicant_data['id'])
+            
             response = ScoreResponse(**explanation)
         else:
             # Rule-based fallback
             response = ScoreResponse(
-                final_score=75.0,  # fallback
+                applicant_id=None,
+                final_score=75.0,
                 score_normalized=75.0,
                 recommendation="требует проверки",
                 human_review_needed=True,
@@ -127,7 +132,10 @@ async def score_applicant(request: ScoreRequest):
                 negative_factors=[]
             )
         
-        CACHE[cache_key] = response
+        # Кэшируем (ограничим размер)
+        if len(CACHE) < 100:
+            CACHE[cache_key] = response
+        
         return response
         
     except Exception as e:
@@ -145,20 +153,21 @@ async def score_batch(request: BatchScoreRequest):
         
         results = []
         for applicant in request.applicants:
-            # Используем тот же метод, что и для одного
-            input_df = pd.DataFrame([applicant])
-            
             if system.model is not None and explainer:
                 explanation = explainer.explain_prediction(applicant)
+                if 'id' in applicant:
+                    explanation['applicant_id'] = str(applicant['id'])
                 results.append(ScoreResponse(**explanation))
             else:
-                # Fallback
+                # Fallback с случайным скором (только для демо)
+                random_score = np.random.uniform(40, 95)
                 results.append(ScoreResponse(
-                    final_score=np.random.uniform(50, 100),
-                    score_normalized=np.random.uniform(50, 100),
-                    recommendation="требует проверки",
-                    human_review_needed=True,
-                    summary="Rule-based fallback",
+                    applicant_id=str(applicant.get('id', 'unknown')),
+                    final_score=random_score,
+                    score_normalized=random_score,
+                    recommendation="требует проверки" if random_score < 75 else "одобрить",
+                    human_review_needed=random_score < 75,
+                    summary="Rule-based fallback scoring",
                     positive_factors=[],
                     negative_factors=[]
                 ))
@@ -167,7 +176,7 @@ async def score_batch(request: BatchScoreRequest):
         results.sort(key=lambda x: x.final_score, reverse=True)
         
         # Shortlist: топ 20% или минимум 5
-        shortlist_size = max(5, int(len(results) * 0.2))
+        shortlist_size = max(5, min(20, int(len(results) * 0.2)))
         shortlist = results[:shortlist_size]
         
         return BatchScoreResponse(
@@ -180,7 +189,7 @@ async def score_batch(request: BatchScoreRequest):
         logger.error(f"Batch scoring error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/top", response_model=List[ScoreResponse])
+@app.get("/top")
 def get_top(n: int = Query(10, ge=1, le=100)):
     """
     Получить топ N кандидатов из уже обработанных
@@ -193,20 +202,21 @@ def get_top(n: int = Query(10, ge=1, le=100)):
         
         results = []
         for _, row in df_top.iterrows():
-            results.append(ScoreResponse(
-                applicant_id=str(row.get('akimat', 'unknown')),
-                final_score=float(row['final_score']),
-                score_normalized=float(row['final_score']),
-                recommendation="одобрить" if row['final_score'] > 75 else "требует проверки",
-                human_review_needed=row['final_score'] < 75,
-                summary=f"Скор: {row['final_score']:.1f}. Эффективность: {row.get('efficiency', 0):.2f}",
-                positive_factors=[],
-                negative_factors=[]
-            ))
+            results.append({
+                "applicant_id": str(row.get('akimat', 'unknown')),
+                "final_score": float(row['final_score']),
+                "score_normalized": float(row['final_score']),
+                "recommendation": "одобрить" if row['final_score'] > 75 else "требует проверки",
+                "human_review_needed": row['final_score'] < 75,
+                "summary": f"Скор: {row['final_score']:.1f}. Эффективность: {row.get('efficiency', 0):.2f}",
+                "efficiency": float(row.get('efficiency', 0)),
+                "success_rate": float(row.get('success_rate', 0))
+            })
         
         return results
         
     except Exception as e:
+        logger.error(f"Top endpoint error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/all")
@@ -222,20 +232,30 @@ def get_all(
         if system is None:
             raise HTTPException(status_code=500, detail="Model not ready")
         
+        if sort_by not in system.df.columns:
+            sort_by = "final_score"
+        
         df_all = system.df.sort_values(sort_by, ascending=False)
         
         # Пагинация
         total = len(df_all)
         df_page = df_all.iloc[offset:offset+limit]
         
+        # Ограничиваем колонки для ответа
+        columns = ['akimat', 'region', 'district', 'final_score', 'efficiency', 
+                   'success_rate', 'application_count', 'total_subsidy']
+        columns = [c for c in columns if c in df_page.columns]
+        
         return {
             "total": total,
             "offset": offset,
             "limit": limit,
-            "data": df_page.fillna("").to_dict(orient="records")
+            "sort_by": sort_by,
+            "data": df_page[columns].fillna("").to_dict(orient="records")
         }
         
     except Exception as e:
+        logger.error(f"All endpoint error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/status")
@@ -248,7 +268,7 @@ def status():
         "ready": True,
         "total_records": len(system.df),
         "model_type": "RandomForest" if system.model else "rule-based",
-        "features_used": getattr(system, "feature_cols", []),
+        "features_used": getattr(system, "feature_cols", [])[:10],  # топ-10
         "has_explainability": explainer is not None,
         "cache_size": len(CACHE)
     }
@@ -259,22 +279,23 @@ def reload_model():
     global system, explainer, CACHE
     try:
         CACHE = {}
+        logger.info("Reloading model...")
         system = SubsidyScoringSystem(DATA_PATH)
         system.run()
         
-        if system.model is not None:
-            bg_data = system.df[system.feature_cols].fillna(0).head(100)
-            bg_scaled = system.scaler.transform(bg_data)
+        if system.model is not None and hasattr(system, 'feature_importance'):
             explainer = SubsidyExplainer(
                 model=system.model,
                 scaler=system.scaler,
                 feature_cols=system.feature_cols,
-                background_data=bg_scaled
+                feature_importance=system.feature_importance
             )
+            logger.info("✅ Explainer reinitialized")
         
         return {"message": "Model reloaded successfully ✅"}
         
     except Exception as e:
+        logger.error(f"Reload error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
